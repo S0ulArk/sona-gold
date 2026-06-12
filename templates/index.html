@@ -40,7 +40,7 @@
         <section class="hero">
             <div class="hero-grid">
                 <div>
-                    <p class="eyebrow">Updated daily · India</p>
+                    <p class="eyebrow" id="hero-eyebrow">Live · India</p>
                     <h1>Today's <span class="gold-text shimmer">gold rate</span>,<br>store by store.</h1>
                     <p class="lede">Live 22K, 24K &amp; 18K prices from India's most trusted jewellers — compared side by side in one place.</p>
                 </div>
@@ -82,7 +82,10 @@
 
         <!-- ══════════ STORE LIST ══════════ -->
         <div class="section-head">
-            <h2>Jewellers</h2>
+            <div>
+                <h2>Jewellers</h2>
+                <span class="today-line" id="today-line"></span>
+            </div>
             <span class="count-tag" id="count-tag"></span>
         </div>
 
@@ -126,6 +129,7 @@
                     </div>
                 </div>
                 <div class="chart-box"><canvas id="history-chart"></canvas></div>
+                <p class="chart-note" id="chart-note" style="display:none;"></p>
             </div>
         </section>
 

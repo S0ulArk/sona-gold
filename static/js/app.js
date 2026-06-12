@@ -36,8 +36,14 @@ async function loadRates() {
         const d = await (await fetch('/api/rates/today')).json();
         state.rates = d.rates || [];
         state.lastUpdated = freshest(state.rates);
-        const el = document.getElementById('bm-date');
-        if (el && d.date) el.textContent = fmtDate(d.date);
+        if (d.date) {
+            const bm = document.getElementById('bm-date');
+            if (bm) bm.textContent = fmtDate(d.date);
+            const eb = document.getElementById('hero-eyebrow');
+            if (eb) eb.textContent = fullDate(d.date) + ' · Live';
+            const tl = document.getElementById('today-line');
+            if (tl) tl.textContent = 'Today · ' + fullDate(d.date);
+        }
         render();
         updateAgo();
     } catch {
@@ -231,22 +237,41 @@ function drawBenchSpark() {
 }
 
 // ─────────── History chart ───────────
+function shortDate(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
 async function loadChart() {
-    if (!state.history.length) return;
     const ctx = document.getElementById('history-chart');
+    const note = document.getElementById('chart-note');
+    if (!ctx) return;
     const k = KEY[state.purity];
+
     const byStore = {};
     state.history.forEach(h => { if (h[k] != null) (byStore[h.store_name] ||= []).push({ x: h.rate_date, y: h[k] }); });
 
+    // Only plot stores that have ≥2 days of history (single points just float at the edge)
+    const multi = Object.entries(byStore).filter(([, pts]) => new Set(pts.map(p => p.x)).size >= 2);
+    const singles = Object.keys(byStore).length - multi.length;
+
+    const labels = [...new Set(state.history.map(h => h.rate_date))].sort();
     const palette = ['#f4d780', '#e08070', '#6fbf86', '#7fb0e0', '#c79ce0', '#e0a06f', '#7fd0c0', '#d0c060', '#e09cc0', '#9ce0a8'];
-    const datasets = Object.entries(byStore).map(([name, pts], i) => ({
+    const datasets = multi.map(([name, pts], i) => ({
         label: name,
         data: pts.sort((a, b) => a.x.localeCompare(b.x)),
         borderColor: palette[i % palette.length],
-        backgroundColor: palette[i % palette.length] + '18',
-        borderWidth: 2, pointRadius: 1.5, pointHoverRadius: 5, tension: 0.35, fill: false,
+        backgroundColor: palette[i % palette.length] + '14',
+        borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 5, tension: 0.35,
+        fill: multi.length === 1, spanGaps: true,
     }));
-    const labels = [...new Set(state.history.map(h => h.rate_date))].sort();
+
+    if (note) {
+        note.textContent = datasets.length
+            ? (singles > 0 ? `${singles} store${singles > 1 ? 's' : ''} need more days of data to chart` : '')
+            : 'Trend builds up as rates are collected daily.';
+        note.style.display = note.textContent ? 'block' : 'none';
+    }
 
     if (chart) chart.destroy();
     chart = new Chart(ctx, {
@@ -256,16 +281,19 @@ async function loadChart() {
             responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: { position: 'bottom', labels: { color: '#c9bfa8', usePointStyle: true, padding: 14, font: { family: 'Manrope', size: 11 } } },
+                legend: { position: 'bottom', labels: { color: '#c9bfa8', usePointStyle: true, pointStyle: 'line', padding: 12, boxWidth: 22, font: { family: 'Manrope', size: 11 } } },
                 tooltip: {
                     backgroundColor: '#1b160e', borderColor: 'rgba(212,175,55,0.3)', borderWidth: 1,
                     titleColor: '#f4d780', bodyColor: '#f3ecdc', padding: 12,
-                    callbacks: { label: c => ` ${c.dataset.label}: ₹${c.parsed.y?.toLocaleString('en-IN')}` },
+                    callbacks: {
+                        title: items => items.length ? shortDate(items[0].label) : '',
+                        label: c => ` ${c.dataset.label}: ₹${c.parsed.y?.toLocaleString('en-IN')}`,
+                    },
                 },
             },
             scales: {
-                x: { grid: { color: 'rgba(212,175,55,0.06)' }, ticks: { color: '#8e836b', maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { family: 'JetBrains Mono', size: 10 } } },
-                y: { grid: { color: 'rgba(212,175,55,0.06)' }, ticks: { color: '#8e836b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => '₹' + v.toLocaleString('en-IN') } },
+                x: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#8e836b', maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { family: 'Manrope', size: 10 }, callback: function (v) { return shortDate(this.getLabelForValue(v)); } } },
+                y: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#8e836b', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 6, callback: v => '₹' + v.toLocaleString('en-IN') } },
             },
         },
     });
@@ -328,6 +356,10 @@ function inrShort(v) { return Number(v).toLocaleString('en-IN', { maximumFractio
 function fmtDate(s) {
     const d = new Date(s + 'T00:00:00');
     return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+function fullDate(s) {
+    const d = new Date(s + 'T00:00:00');
+    return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 function emptyState() {
     return `<div style="grid-column:1/-1;text-align:center;padding:50px 20px;color:var(--ink-mute);">
