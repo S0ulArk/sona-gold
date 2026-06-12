@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0c0a07">
+    <title>SONA — Live Gold Rates · Delhi & UP West</title>
+    <meta name="description" content="Compare today's 22K, 24K & 18K gold rates across jewellers in Delhi, Moradabad & Bareilly.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🪙</text></svg>">
+</head>
+<body>
+    <!-- ══════════ TOP BAR ══════════ -->
+    <header class="topbar">
+        <div class="topbar-inner">
+            <div class="brand">
+                <div class="ingot">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 16l3-9h12l3 9-9 3-9-3z" opacity="0.35"/><path d="M6 7h12l3 9-9 3-9-3 3-9zm2.2 2L6.5 15l5.5 1.8L17.5 15l-1.7-6H8.2z"/></svg>
+                </div>
+                <div class="brand-name">
+                    <b class="gold-text shimmer">SONA</b>
+                    <span class="deva">सोना · Live Gold Rates</span>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span class="live"><span class="dot"></span><span id="updated-ago">live</span></span>
+                <button class="icon-btn" id="refresh-btn" onclick="refreshAll()" title="Refresh rates" aria-label="Refresh">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="wrap">
+        <!-- ══════════ HERO ══════════ -->
+        <section class="hero">
+            <div class="hero-grid">
+                <div>
+                    <p class="eyebrow">Updated daily · India</p>
+                    <h1>Today's <span class="gold-text shimmer">gold rate</span>,<br>store by store.</h1>
+                    <p class="lede">Live 22K, 24K &amp; 18K prices from India's most trusted jewellers — compared side by side in one place.</p>
+                </div>
+
+                <!-- Benchmark panel -->
+                <div class="benchmark">
+                    <div class="bm-top">
+                        <span class="bm-label">Best <span id="bm-purity">22K</span> rate today</span>
+                        <span class="bm-city" id="bm-date"></span>
+                    </div>
+                    <div class="bm-figure gold-text" id="bm-figure">₹—</div>
+                    <span class="bm-unit">per gram · <span id="bm-store">—</span></span>
+                    <div class="bm-meta">
+                        <span class="bm-chip">Range <b id="bm-range">—</b></span>
+                        <span class="bm-chip">Stores <b id="bm-count">—</b></span>
+                        <canvas class="spark" id="bm-spark" width="150" height="40"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ══════════ CONTROLS ══════════ -->
+        <section class="controls">
+            <div class="control-row">
+                <div class="segment" id="purity-seg">
+                    <span class="seg-ind" id="seg-ind"></span>
+                    <button class="seg-btn active" data-purity="22k">22K</button>
+                    <button class="seg-btn" data-purity="24k">24K</button>
+                    <button class="seg-btn" data-purity="18k">18K</button>
+                </div>
+                <span class="spacer"></span>
+                <select class="select" id="sort-select" onchange="render()">
+                    <option value="price-asc">Cheapest first</option>
+                    <option value="price-desc">Costliest first</option>
+                    <option value="name">Store A–Z</option>
+                </select>
+            </div>
+        </section>
+
+        <!-- ══════════ STORE LIST ══════════ -->
+        <div class="section-head">
+            <h2>Jewellers</h2>
+            <span class="count-tag" id="count-tag"></span>
+        </div>
+
+        <!-- Mobile cards -->
+        <div class="cards" id="cards">
+            <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+        </div>
+
+        <!-- Desktop table -->
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th><th>Store</th>
+                        <th>22K /g</th><th>24K /g</th><th>18K /g</th>
+                        <th>Change</th><th>/10g</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+
+        <!-- ══════════ TABS ══════════ -->
+        <div class="tabs">
+            <button class="tab active" data-tab="history" onclick="switchTab('history')">Price History</button>
+            <button class="tab" data-tab="manual" onclick="switchTab('manual')">Add a Store</button>
+        </div>
+
+        <!-- History panel -->
+        <section class="panel active" id="panel-history">
+            <div class="chart-card">
+                <div class="chart-head">
+                    <h3>Trend · <span id="chart-purity-label">22K</span> per gram</h3>
+                    <div style="display:flex;gap:8px;">
+                        <select class="select" id="chart-days" onchange="loadChart()">
+                            <option value="7">7 days</option>
+                            <option value="14">14 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="60">60 days</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="chart-box"><canvas id="history-chart"></canvas></div>
+            </div>
+        </section>
+
+        <!-- Manual add panel -->
+        <section class="panel" id="panel-manual">
+            <div class="form-card">
+                <h3>Add a store rate</h3>
+                <p>Famous local jewellers (like Lala Jugal Kishore in Moradabad) don't always publish rates online. Add them here.</p>
+                <form onsubmit="submitManual(event)">
+                    <div class="field">
+                        <label>Store</label>
+                        <select id="m-store" required>
+                            <option value="">Select store…</option>
+                        </select>
+                    </div>
+                    <div class="grid3">
+                        <div class="field"><label>22K /g</label><input type="number" id="m-22k" step="0.01" placeholder="13620"></div>
+                        <div class="field"><label>24K /g</label><input type="number" id="m-24k" step="0.01" placeholder="14858"></div>
+                        <div class="field"><label>18K /g</label><input type="number" id="m-18k" step="0.01" placeholder="11144"></div>
+                    </div>
+                    <div class="field"><label>Source URL (optional)</label><input type="url" id="m-url" placeholder="https://…"></div>
+                    <button type="submit" class="btn-gold">Save rate</button>
+                    <div class="form-msg" id="m-msg" style="display:none;"></div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="deva-mark">शुभ · मंगल</div>
+        <p>SONA — rates sourced directly from jewellers' official websites. Indicative only; confirm in-store before purchase.</p>
+    </footer>
+
+    <div class="toast" id="toast"></div>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

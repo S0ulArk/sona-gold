@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+jinja2
+apscheduler
+httpx
+beautifulsoup4
+lxml
+python-dotenv
+aiosqlite
+curl_cffi
