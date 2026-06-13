@@ -1,3 +1,4 @@
+import os
 import logging
 import asyncio
 import re
@@ -9,6 +10,24 @@ from curl_cffi import requests as cffi_requests
 from .base import GoldRate, parse_price
 
 logger = logging.getLogger(__name__)
+
+# Optional scraping-API proxy (set on cloud where Tanishq's WAF blocks datacenter IPs).
+# Free tier of ScraperAPI / compatible. When unset (e.g. local residential IP),
+# Tanishq is fetched directly.
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "").strip()
+SCRAPER_API_COUNTRY = os.environ.get("SCRAPER_API_COUNTRY", "in").strip()
+
+
+def _proxy_get(url: str, timeout: int = 60):
+    """Fetch a URL through the scraping-API (residential/India IP) if a key is
+    configured, otherwise fetch directly with a browser-impersonating client."""
+    if SCRAPER_API_KEY:
+        params = {"api_key": SCRAPER_API_KEY, "url": url}
+        if SCRAPER_API_COUNTRY:
+            params["country_code"] = SCRAPER_API_COUNTRY
+        return httpx.get("https://api.scraperapi.com/", params=params,
+                         timeout=timeout, follow_redirects=True)
+    return cffi_requests.Session(impersonate="chrome131").get(url, timeout=15)
 
 
 def _favicon(domain: str) -> str:
@@ -156,20 +175,17 @@ def _parse_tanishq_html(html: str, rate: GoldRate) -> bool:
 
 def _s_tanishq(cfg):
     rate = _make_rate(cfg)
-    attempts = [
-        (cfg["url"], "chrome131"),          # direct (works from residential IPs)
-        (_TANISHQ_MIA, "chrome131"),        # Mia fallback (survives datacenter-IP WAF block)
-        (_TANISHQ_MIA, "chrome124"),
-    ]
-    for url, prof in attempts:
+    # Direct/Mia first (free, works from residential IPs). On cloud these are
+    # WAF-blocked, so _proxy_get routes through the scraping-API when a key is set.
+    for url in (cfg["url"], _TANISHQ_MIA):
         try:
-            r = cffi_requests.Session(impersonate=prof).get(url, timeout=15)
+            r = _proxy_get(url)
             if r.status_code == 200 and _parse_tanishq_html(r.text, rate):
-                if "mia" in url:
-                    logger.info("Tanishq: used Mia-by-Tanishq fallback")
+                via = "scraping-API" if SCRAPER_API_KEY else ("Mia fallback" if "mia" in url else "direct")
+                logger.info(f"Tanishq: via {via}")
                 return rate
         except Exception as e:
-            logger.warning(f"Tanishq attempt {url.split('//')[1][:25]} ({prof}): {e}")
+            logger.warning(f"Tanishq attempt {url.split('//')[1][:25]}: {e}")
     return rate
 
 
