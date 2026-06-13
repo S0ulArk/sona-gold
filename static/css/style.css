@@ -332,6 +332,25 @@ body::after {
     border: 1px solid transparent;
     box-shadow: var(--shadow-glow), var(--shadow-card);
 }
+
+/* Link-only card for stores we can't scrape (e.g. WAF-blocked) */
+.card.unavailable {
+    display: flex; align-items: center; gap: 12px;
+    text-decoration: none; color: inherit;
+    border-style: dashed;
+    background: var(--surface);
+}
+.card.unavailable .store-id { flex: 1; }
+.card.unavailable:hover { border-color: var(--gold); border-style: solid; }
+.unavail-note { display: block; font-size: 0.72rem; color: var(--ink-mute); margin-top: 2px; line-height: 1.3; }
+.view-link {
+    flex: none; white-space: nowrap;
+    font-size: 0.84rem; font-weight: 800;
+    color: #2c2105; background: var(--gold-grad); background-size: 160% auto;
+    padding: 7px 13px; border-radius: var(--r-pill);
+}
+.unavailable-row { cursor: pointer; opacity: 0.92; }
+.unavailable-row:hover { background: var(--surface-2); }
 .rank {
     grid-area: rank;
     width: 30px; height: 30px; flex: none;

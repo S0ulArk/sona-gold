@@ -110,6 +110,21 @@ function renderCards(rows, min, k) {
     const el = document.getElementById('cards');
     if (!rows.length) { el.innerHTML = emptyState(); return; }
     el.innerHTML = rows.map((r, i) => {
+        if (r.unavailable) {
+            const link = r.store_url || r.source_url || '#';
+            return `
+            <a class="card unavailable" href="${link}" target="_blank" rel="noopener" style="animation-delay:${i * 45}ms">
+                <div class="rank">↗</div>
+                <div class="store-id">
+                    ${r.logo ? `<img class="store-logo" src="${r.logo}" onerror="this.remove()" alt="">` : ''}
+                    <div style="min-width:0">
+                        <span class="store-name">${r.store_name}</span>
+                        <span class="unavail-note">Tap to check today's rate on their site</span>
+                    </div>
+                </div>
+                <span class="view-link">View&nbsp;↗</span>
+            </a>`;
+        }
         const v = r[k];
         const best = v != null && v === min;
         const delta = deltaHtml(r[`change_${state.purity}`]);
@@ -153,6 +168,16 @@ function expandHtml(r) {
 function renderTable(rows, min) {
     const k = KEY[state.purity];
     document.getElementById('table-body').innerHTML = rows.map((r, i) => {
+        if (r.unavailable) {
+            const link = r.store_url || r.source_url || '#';
+            return `
+            <tr class="unavailable-row" onclick="window.open('${link}','_blank')">
+                <td class="t-rank">↗</td>
+                <td><div class="t-store">${r.logo ? `<img class="store-logo" src="${r.logo}" onerror="this.remove()">` : ''}${r.store_name}</div></td>
+                <td colspan="4" style="color:var(--ink-mute);font-size:0.86rem">Rate not available here — check on their site</td>
+                <td class="t-price"><span class="view-link">View&nbsp;↗</span></td>
+            </tr>`;
+        }
         const best = r[k] != null && r[k] === min;
         return `
         <tr class="${best ? 'best-row' : ''}" onclick="window.open('${r.store_url || r.source_url || '#'}','_blank')">

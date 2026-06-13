@@ -56,6 +56,7 @@ async def api_today_rates():
     rates = await get_today_rates()
     yesterday = {r["store_slug"]: r for r in await get_yesterday_rates()}
     info = {s["slug"]: s for s in SCRAPERS.values()}
+    present = set()
 
     for r in rates:
         y = yesterday.get(r["store_slug"])
@@ -68,6 +69,22 @@ async def api_today_rates():
         meta = info.get(r["store_slug"], {})
         r["logo"] = meta.get("logo", "")
         r["store_url"] = meta.get("url", r.get("source_url", ""))
+        r["unavailable"] = False
+        present.add(r["store_slug"])
+
+    # Auto-scrape stores with no rate today (e.g. WAF-blocked from the cloud):
+    # still list them as link-only so the user can open the store's own page.
+    for s in SCRAPERS.values():
+        if s.get("method") == "manual" or s["slug"] in present:
+            continue
+        rates.append({
+            "store_name": s["name"], "store_slug": s["slug"],
+            "gold_22k": None, "gold_24k": None, "gold_18k": None,
+            "change_22k": None, "change_24k": None, "change_18k": None,
+            "logo": s.get("logo", ""), "store_url": s.get("url", ""),
+            "source_url": s.get("url", ""), "scraped_at": None,
+            "unavailable": True,
+        })
 
     return {"date": date.today().isoformat(), "rates": rates}
 
