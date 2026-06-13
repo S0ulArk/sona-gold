@@ -2,8 +2,12 @@ import logging
 from datetime import date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.scrapers import scrape_all
-from app.database import save_rate
+from app.database import save_rate, get_today_rates
 from app.config import SCRAPE_INTERVAL_HOURS
+
+# Stores fetched via the paid scraping-API proxy — only worth fetching once/day
+# (their rate is fixed for the day), to conserve credits.
+PROXY_STORES = {"tanishq"}
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -27,7 +31,12 @@ async def save_rate_with_history(rate):
 
 async def run_scrape_job():
     logger.info("Starting scheduled scrape job...")
-    rates = await scrape_all()
+    # Skip paid-proxy stores we already have today (saves scraping-API credits)
+    today_slugs = {r["store_slug"] for r in await get_today_rates() if r.get("gold_22k") is not None}
+    skip = {s for s in PROXY_STORES if s in today_slugs}
+    if skip:
+        logger.info(f"Skipping (already have today): {', '.join(skip)}")
+    rates = await scrape_all(skip=skip)
     saved = 0
     for rate in rates:
         if rate.gold_22k or rate.gold_24k or rate.gold_18k:

@@ -182,13 +182,15 @@ def _parse_tanishq_html(html: str, rate: GoldRate) -> bool:
 
 def _s_tanishq(cfg):
     rate = _make_rate(cfg)
-    # Direct/Mia first (free, works from residential IPs). On cloud these are
-    # WAF-blocked, so _proxy_get routes through the scraping-API when a key is set.
-    for url in (cfg["url"], _TANISHQ_MIA):
+    proxied = bool(SCRAPINGANT_API_KEY or SCRAPER_API_KEY)
+    # When proxied (cloud), one residential request to the main URL succeeds — do
+    # NOT also fetch Mia (it would double the paid credits). Mia is only a free
+    # fallback for the direct/residential path.
+    urls = [cfg["url"]] if proxied else [cfg["url"], _TANISHQ_MIA]
+    for url in urls:
         try:
             r = _proxy_get(url)
             if r.status_code == 200 and _parse_tanishq_html(r.text, rate):
-                proxied = SCRAPINGANT_API_KEY or SCRAPER_API_KEY
                 via = "scraping-API" if proxied else ("Mia fallback" if "mia" in url else "direct")
                 logger.info(f"Tanishq: via {via}")
                 return rate
@@ -372,6 +374,7 @@ async def scrape_store(slug: str) -> GoldRate | None:
     return await _run(cfg)
 
 
-async def scrape_all() -> list[GoldRate]:
-    targets = [c for c in STORE_CONFIGS if c["method"] != "manual"]
+async def scrape_all(skip: set | None = None) -> list[GoldRate]:
+    skip = skip or set()
+    targets = [c for c in STORE_CONFIGS if c["method"] != "manual" and c["slug"] not in skip]
     return await asyncio.gather(*[_run(c) for c in targets])
