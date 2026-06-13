@@ -106,7 +106,9 @@ async def api_dates():
 
 @app.post("/api/scrape")
 async def api_scrape():
-    await run_scrape_job()
+    # User-triggered refresh: refresh the free direct stores only, never spend
+    # scraping-API credits on the paid proxy stores (their rate is daily-fixed).
+    await run_scrape_job(skip_proxy=True)
     return {"message": "Scrape completed"}
 
 

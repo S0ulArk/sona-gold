@@ -29,13 +29,17 @@ async def save_rate_with_history(rate):
                             rate.source_url, rate_date=d)
 
 
-async def run_scrape_job():
-    logger.info("Starting scheduled scrape job...")
-    # Skip paid-proxy stores we already have today (saves scraping-API credits)
+async def run_scrape_job(skip_proxy: bool = False):
+    logger.info("Starting scrape job...")
+    # Skip paid-proxy stores we already have today (saves scraping-API credits).
     today_slugs = {r["store_slug"] for r in await get_today_rates() if r.get("gold_22k") is not None}
     skip = {s for s in PROXY_STORES if s in today_slugs}
+    # User-triggered refreshes never spend credits on proxy stores — their rate
+    # is fixed for the day and is refreshed by the once-daily scheduled job.
+    if skip_proxy:
+        skip |= PROXY_STORES
     if skip:
-        logger.info(f"Skipping (already have today): {', '.join(skip)}")
+        logger.info(f"Skipping proxy stores: {', '.join(skip)}")
     rates = await scrape_all(skip=skip)
     saved = 0
     for rate in rates:
