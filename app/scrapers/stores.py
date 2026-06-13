@@ -11,22 +11,29 @@ from .base import GoldRate, parse_price
 
 logger = logging.getLogger(__name__)
 
-# Optional scraping-API proxy (set on cloud where Tanishq's WAF blocks datacenter IPs).
-# Free tier of ScraperAPI / compatible. When unset (e.g. local residential IP),
-# Tanishq is fetched directly.
-SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "").strip()
-SCRAPER_API_COUNTRY = os.environ.get("SCRAPER_API_COUNTRY", "in").strip()
+# Optional scraping-API proxy, used on the cloud where Tanishq's WAF blocks
+# datacenter IPs. ScrapingAnt has a permanent free tier (10k credits/mo) with
+# residential + India-geo proxies. When no key is set (e.g. a local residential
+# IP), Tanishq is fetched directly with TLS impersonation.
+SCRAPINGANT_API_KEY = os.environ.get("SCRAPINGANT_API_KEY", "").strip()
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "").strip()  # ScraperAPI fallback
 
 
-def _proxy_get(url: str, timeout: int = 60):
-    """Fetch a URL through the scraping-API (residential/India IP) if a key is
-    configured, otherwise fetch directly with a browser-impersonating client."""
+def _proxy_get(url: str, timeout: int = 70):
+    """Fetch a URL through a residential/India scraping-API if a key is set,
+    else fetch directly with a browser-impersonating client."""
+    if SCRAPINGANT_API_KEY:
+        return httpx.get("https://api.scrapingant.com/v2/general", params={
+            "url": url,
+            "x-api-key": SCRAPINGANT_API_KEY,
+            "proxy_type": "residential",   # beats the datacenter-IP block
+            "proxy_country": "IN",         # India geo
+            "browser": "false",            # static HTML → 25 credits, no JS render
+        }, timeout=timeout, follow_redirects=True)
     if SCRAPER_API_KEY:
-        params = {"api_key": SCRAPER_API_KEY, "url": url}
-        if SCRAPER_API_COUNTRY:
-            params["country_code"] = SCRAPER_API_COUNTRY
-        return httpx.get("https://api.scraperapi.com/", params=params,
-                         timeout=timeout, follow_redirects=True)
+        return httpx.get("https://api.scraperapi.com/", params={
+            "api_key": SCRAPER_API_KEY, "url": url, "country_code": "in",
+        }, timeout=timeout, follow_redirects=True)
     return cffi_requests.Session(impersonate="chrome131").get(url, timeout=15)
 
 
@@ -181,7 +188,8 @@ def _s_tanishq(cfg):
         try:
             r = _proxy_get(url)
             if r.status_code == 200 and _parse_tanishq_html(r.text, rate):
-                via = "scraping-API" if SCRAPER_API_KEY else ("Mia fallback" if "mia" in url else "direct")
+                proxied = SCRAPINGANT_API_KEY or SCRAPER_API_KEY
+                via = "scraping-API" if proxied else ("Mia fallback" if "mia" in url else "direct")
                 logger.info(f"Tanishq: via {via}")
                 return rate
         except Exception as e:
