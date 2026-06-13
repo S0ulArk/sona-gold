@@ -120,10 +120,12 @@ def _inr(text) -> float | None:
 
 
 # ═══════════════ Tanishq (curl_cffi + 30d history) ═══════════════
-def _s_tanishq(cfg):
-    rate = _make_rate(cfg)
-    s = cffi_requests.Session(impersonate="chrome131")
-    html = s.get(cfg["url"], timeout=15).text
+# Tanishq's Cloudflare WAF blocks datacenter IPs (e.g. cloud hosts), so we fall
+# back to Mia by Tanishq — same Titan group, identical rate + history, different infra.
+_TANISHQ_MIA = "https://www.miabytanishq.com/en_IN/gold-rate-today"
+
+
+def _parse_tanishq_html(html: str, rate: GoldRate) -> bool:
     m = re.search(r'id="goldRateValues"[^>]*?value="(.*?)"\s*/?>', html, re.DOTALL)
     if m:
         try:
@@ -142,13 +144,32 @@ def _s_tanishq(cfg):
                 latest = hist[-1]
                 rate.gold_22k, rate.gold_24k, rate.gold_18k = latest["gold_22k"], latest["gold_24k"], latest["gold_18k"]
                 rate.history = hist
-                return rate
+                return True
         except json.JSONDecodeError:
             pass
     for kt, attr in (("22k", "22kt"), ("24k", "24kt"), ("18k", "18kt")):
         mm = re.search(rf'data-goldrate{attr}="(\d+)"', html)
         if mm:
             setattr(rate, f"gold_{kt}", float(mm.group(1)))
+    return rate.gold_22k is not None
+
+
+def _s_tanishq(cfg):
+    rate = _make_rate(cfg)
+    attempts = [
+        (cfg["url"], "chrome131"),          # direct (works from residential IPs)
+        (_TANISHQ_MIA, "chrome131"),        # Mia fallback (survives datacenter-IP WAF block)
+        (_TANISHQ_MIA, "chrome124"),
+    ]
+    for url, prof in attempts:
+        try:
+            r = cffi_requests.Session(impersonate=prof).get(url, timeout=15)
+            if r.status_code == 200 and _parse_tanishq_html(r.text, rate):
+                if "mia" in url:
+                    logger.info("Tanishq: used Mia-by-Tanishq fallback")
+                return rate
+        except Exception as e:
+            logger.warning(f"Tanishq attempt {url.split('//')[1][:25]} ({prof}): {e}")
     return rate
 
 
