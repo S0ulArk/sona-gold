@@ -3,7 +3,6 @@ from datetime import date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.scrapers import scrape_all
 from app.database import save_rate, get_today_rates
-from app.config import SCRAPE_INTERVAL_HOURS
 
 # Stores fetched via the paid scraping-API proxy — only worth fetching once/day
 # (their rate is fixed for the day), to conserve credits.
@@ -50,7 +49,9 @@ async def run_scrape_job(skip_proxy: bool = False):
 
 
 def start_scheduler():
-    scheduler.add_job(run_scrape_job, "interval", hours=SCRAPE_INTERVAL_HOURS,
-                      id="scrape_gold_rates", replace_existing=True)
+    # 9:20am IST = 03:50 UTC  |  4:10pm IST = 10:40 UTC
+    for job_id, hour, minute in [("scrape_morning", 3, 50), ("scrape_afternoon", 10, 40)]:
+        scheduler.add_job(run_scrape_job, "cron", hour=hour, minute=minute,
+                          timezone="UTC", id=job_id, replace_existing=True)
     scheduler.start()
-    logger.info(f"Scheduler started: every {SCRAPE_INTERVAL_HOURS}h")
+    logger.info("Scheduler started: 9:20am IST and 4:10pm IST")
