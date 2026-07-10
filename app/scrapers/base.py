@@ -1,8 +1,5 @@
 import re
-import logging
 from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,25 +27,10 @@ def parse_price(text) -> float | None:
         val = float(cleaned)
         if val < 100:
             return None
-        if val > 20000:
+        # Values above ~40k must be a per-10g quote (per-gram tops out near 22k
+        # even for 24K); halving-to-per-gram must not clip a real per-gram rate.
+        if val > 40000:
             val = val / 10
         return round(val, 2)
     except ValueError:
         return None
-
-
-def find_prices_in_text(text: str) -> list[float]:
-    patterns = [
-        r"₹\s*([\d,]+(?:\.\d+)?)",
-        r"Rs\.?\s*([\d,]+(?:\.\d+)?)",
-        r"INR\s*([\d,]+(?:\.\d+)?)",
-        r"([\d,]{4,}(?:\.\d+)?)\s*(?:per\s*gram|/g)",
-    ]
-    prices = []
-    for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for m in matches:
-            p = parse_price(m)
-            if p and 3000 < p < 15000:
-                prices.append(p)
-    return sorted(set(prices))

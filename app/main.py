@@ -123,16 +123,28 @@ async def api_scrape_single(store_slug: str):
             "gold_24k": rate.gold_24k, "gold_18k": rate.gold_18k}
 
 
+def _num(v):
+    """Coerce a submitted rate to float|None; reject anything non-numeric so the
+    DB only ever holds numbers (a string rate would 500 the Postgres path and
+    break sorting/rendering on SQLite)."""
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Rates must be numbers")
+
+
 @app.post("/api/rates/manual")
 async def api_manual(data: dict):
     for f in ("store_slug", "store_name"):
         if f not in data:
             raise HTTPException(400, f"Missing field: {f}")
-    if not any(data.get(k) for k in ("gold_22k", "gold_24k", "gold_18k")):
+    g22, g24, g18 = (_num(data.get(k)) for k in ("gold_22k", "gold_24k", "gold_18k"))
+    if not any((g22, g24, g18)):
         raise HTTPException(400, "At least one rate required")
     await save_rate(
-        data["store_name"], data["store_slug"],
-        data.get("gold_22k"), data.get("gold_24k"), data.get("gold_18k"),
-        data.get("source_url", "manual"),
+        str(data["store_name"])[:120], str(data["store_slug"])[:80],
+        g22, g24, g18, str(data.get("source_url", "manual"))[:500],
     )
     return {"message": "Saved"}

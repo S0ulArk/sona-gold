@@ -1,407 +1,236 @@
 // ════════════════════════════════════════════
 //  SONA — Live Gold Rates
+//  Sona.* = data + helpers (fetch live rates, stats, sparkline, chart);
+//  the IIFE at the bottom renders the page.
 // ════════════════════════════════════════════
+window.Sona = (function () {
+    const KEY = { '22k': 'gold_22k', '24k': 'gold_24k', '18k': 'gold_18k' };
+    const OTHERS = { '22k': ['24k', '18k'], '24k': ['22k', '18k'], '18k': ['22k', '24k'] };
+    const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESC[c]);
+    const safeUrl = u => { const s = String(u ?? '').trim(); return /^https?:\/\//i.test(s) ? s : ''; };
+    const inr = v => v == null ? '₹—' : '₹' + Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    const inrShort = v => v == null ? '—' : Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    const median = a => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+    const fullDate = s => { const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); };
+    const shortDate = s => { const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); };
 
-const KEY = { '22k': 'gold_22k', '24k': 'gold_24k', '18k': 'gold_18k' };
-const state = {
-    purity: '22k',
-    sort: 'price-asc',
-    rates: [],
-    history: [],
-    stores: [],
-    lastUpdated: null,
-};
-let chart = null;
-
-document.addEventListener('DOMContentLoaded', init);
-
-async function init() {
-    bindPurity();
-    await Promise.all([loadStores(), loadRates(), loadHistory()]);
-    positionSegInd();
-    setInterval(updateAgo, 30000);
-}
-
-// ─────────── Data ───────────
-async function loadStores() {
-    try {
-        const d = await (await fetch('/api/stores')).json();
-        state.stores = d.stores || [];
-        renderManualStores();
-    } catch { state.stores = []; }
-}
-
-async function loadRates() {
-    try {
-        const d = await (await fetch('/api/rates/today')).json();
-        state.rates = d.rates || [];
-        state.lastUpdated = freshest(state.rates);
-        if (d.date) {
-            const bm = document.getElementById('bm-date');
-            if (bm) bm.textContent = fmtDate(d.date);
-            const eb = document.getElementById('hero-eyebrow');
-            if (eb) eb.textContent = fullDate(d.date) + ' · Live';
-            const tl = document.getElementById('today-line');
-            if (tl) tl.textContent = 'Today · ' + fullDate(d.date);
-        }
-        render();
-        updateAgo();
-    } catch {
-        document.getElementById('cards').innerHTML = emptyState();
-    }
-}
-
-async function loadHistory() {
-    try {
-        const days = document.getElementById('chart-days').value;
-        const d = await (await fetch(`/api/history?days=${days}`)).json();
-        state.history = d.history || [];
-        loadChart();
-        render();
-    } catch { state.history = []; }
-}
-
-function freshest(rates) {
-    let t = null;
-    rates.forEach(r => { if (r.scraped_at && (!t || r.scraped_at > t)) t = r.scraped_at; });
-    return t;
-}
-
-// ─────────── Sort + render ───────────
-function render() {
-    state.sort = document.getElementById('sort-select').value;
-    const k = KEY[state.purity];
-    let rows = [...state.rates];
-    const priced = rows.filter(r => r[k] != null);
-
-    if (state.sort === 'price-asc') rows.sort((a, b) => (a[k] ?? 1e9) - (b[k] ?? 1e9));
-    else if (state.sort === 'price-desc') rows.sort((a, b) => (b[k] ?? -1) - (a[k] ?? -1));
-    else rows.sort((a, b) => a.store_name.localeCompare(b.store_name));
-
-    const vals = priced.map(r => r[k]);
-    const min = vals.length ? Math.min(...vals) : null;
-    const max = vals.length ? Math.max(...vals) : null;
-
-    renderBenchmark(priced, min, max);
-    renderCards(rows, min, k);
-    renderTable(rows, min);
-    document.getElementById('count-tag').textContent = `${state.rates.length} stores`;
-}
-
-function renderBenchmark(priced, min, max) {
-    document.getElementById('bm-purity').textContent = state.purity.toUpperCase();
-    document.getElementById('bm-count').textContent = priced.length;
-
-    if (!priced.length) {
-        document.getElementById('bm-figure').textContent = '₹—';
-        document.getElementById('bm-store').textContent = 'no data yet';
-        document.getElementById('bm-range').textContent = '—';
-        return;
-    }
-    const k = KEY[state.purity];
-    const best = priced.reduce((a, b) => (a[k] < b[k] ? a : b));
-    document.getElementById('bm-figure').textContent = inr(min);
-    document.getElementById('bm-store').textContent = best.store_name;
-    document.getElementById('bm-range').textContent = `${inr(min)} – ${inr(max)}`;
-    drawBenchSpark();
-}
-
-function renderCards(rows, min, k) {
-    const el = document.getElementById('cards');
-    if (!rows.length) { el.innerHTML = emptyState(); return; }
-    el.innerHTML = rows.map((r, i) => {
-        if (r.unavailable) {
-            const link = r.store_url || r.source_url || '#';
-            return `
-            <a class="card unavailable" href="${link}" target="_blank" rel="noopener" style="animation-delay:${i * 45}ms">
-                <div class="rank">↗</div>
-                <div class="store-id">
-                    ${r.logo ? `<img class="store-logo" src="${r.logo}" onerror="this.remove()" alt="">` : ''}
-                    <div style="min-width:0">
-                        <span class="store-name">${r.store_name}</span>
-                        <span class="unavail-note">Tap to check today's rate on their site</span>
-                    </div>
-                </div>
-                <span class="view-link">View&nbsp;↗</span>
-            </a>`;
-        }
-        const v = r[k];
-        const best = v != null && v === min;
-        const delta = deltaHtml(r[`change_${state.purity}`]);
-        return `
-        <article class="card ${best ? 'best' : ''}" style="animation-delay:${i * 45}ms" data-slug="${r.store_slug}" onclick="toggleCard(this)">
-            <div class="rank">${best ? '★' : i + 1}</div>
-            <div class="store-id">
-                ${r.logo ? `<img class="store-logo" src="${r.logo}" onerror="this.remove()" alt="">` : ''}
-                <span class="store-name">${r.store_name}</span>
-                ${best ? '<span class="ribbon">Best</span>' : ''}
-            </div>
-            <div class="chips">
-                ${chip('22K', r.gold_22k)} ${chip('24K', r.gold_24k)} ${chip('18K', r.gold_18k)}
-            </div>
-            <div class="price-col">
-                ${v != null ? `<span class="price">${inr(v)}</span>` : '<span class="price-na">—</span>'}
-                ${delta}
-            </div>
-            <div class="card-expand">${expandHtml(r)}</div>
-        </article>`;
-    }).join('');
-}
-
-function chip(label, val) {
-    if (val == null) return `<span class="chip">${label} <b>—</b></span>`;
-    return `<span class="chip">${label} <b>${inrShort(val)}</b></span>`;
-}
-
-function expandHtml(r) {
-    const hist = storeHistory(r.store_slug);
-    return `
-        <div class="mini-rows">
-            <div class="mini-stat">22K /10g<b>${r.gold_22k != null ? '₹' + (r.gold_22k * 10).toLocaleString('en-IN') : '—'}</b></div>
-            <div class="mini-stat">24K /10g<b>${r.gold_24k != null ? '₹' + (r.gold_24k * 10).toLocaleString('en-IN') : '—'}</b></div>
-            <div class="mini-stat">18K /10g<b>${r.gold_18k != null ? '₹' + (r.gold_18k * 10).toLocaleString('en-IN') : '—'}</b></div>
-        </div>
-        ${hist.length > 1 ? `<svg class="mini-spark" viewBox="0 0 300 56" preserveAspectRatio="none">${sparkPath(hist, 300, 56)}</svg>` : '<div class="mini-stat">History builds up daily.</div>'}
-        ${r.store_url || r.source_url ? `<a class="visit" href="${r.store_url || r.source_url}" target="_blank" rel="noopener">Visit ${r.store_name} ↗</a>` : ''}`;
-}
-
-function renderTable(rows, min) {
-    const k = KEY[state.purity];
-    document.getElementById('table-body').innerHTML = rows.map((r, i) => {
-        if (r.unavailable) {
-            const link = r.store_url || r.source_url || '#';
-            return `
-            <tr class="unavailable-row" onclick="window.open('${link}','_blank')">
-                <td class="t-rank">↗</td>
-                <td><div class="t-store">${r.logo ? `<img class="store-logo" src="${r.logo}" onerror="this.remove()">` : ''}${r.store_name}</div></td>
-                <td colspan="4" style="color:var(--ink-mute);font-size:0.86rem">Rate not available here — check on their site</td>
-                <td class="t-price"><span class="view-link">View&nbsp;↗</span></td>
-            </tr>`;
-        }
-        const best = r[k] != null && r[k] === min;
-        return `
-        <tr class="${best ? 'best-row' : ''}" onclick="window.open('${r.store_url || r.source_url || '#'}','_blank')">
-            <td class="t-rank">${best ? '★' : i + 1}</td>
-            <td><div class="t-store">${r.logo ? `<img class="store-logo" src="${r.logo}" onerror="this.remove()">` : ''}${r.store_name}</div></td>
-            <td class="t-price ${state.purity === '22k' && best ? 'lead' : ''}">${cell(r.gold_22k)}</td>
-            <td class="t-price ${state.purity === '24k' && best ? 'lead' : ''}">${cell(r.gold_24k)}</td>
-            <td class="t-price ${state.purity === '18k' && best ? 'lead' : ''}">${cell(r.gold_18k)}</td>
-            <td>${deltaHtml(r.change_22k, true)}</td>
-            <td class="t-price">${r[k] != null ? '₹' + (r[k] * 10).toLocaleString('en-IN') : '—'}</td>
-        </tr>`;
-    }).join('');
-}
-
-const cell = v => v != null ? inr(v) : '<span style="color:var(--ink-faint)">—</span>';
-
-function deltaHtml(d, inline) {
-    if (d == null) return inline ? '<span style="color:var(--ink-faint)">—</span>' : '';
-    if (d > 0) return `<span class="delta up">▲ ₹${Math.abs(d).toFixed(0)}</span>`;
-    if (d < 0) return `<span class="delta down">▼ ₹${Math.abs(d).toFixed(0)}</span>`;
-    return '<span class="delta flat">—</span>';
-}
-
-function toggleCard(el) { el.classList.toggle('open'); }
-
-// ─────────── Purity segmented ───────────
-function bindPurity() {
-    document.querySelectorAll('.seg-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state.purity = btn.dataset.purity;
-            positionSegInd();
-            document.getElementById('chart-purity-label').textContent = state.purity.toUpperCase();
-            render();
-            loadChart();
-        });
-    });
-    window.addEventListener('resize', positionSegInd);
-}
-function positionSegInd() {
-    const active = document.querySelector('.seg-btn.active');
-    const ind = document.getElementById('seg-ind');
-    if (active && ind) { ind.style.width = active.offsetWidth + 'px'; ind.style.transform = `translateX(${active.offsetLeft - 4}px)`; }
-}
-
-// ─────────── Sparklines ───────────
-function storeHistory(slug) {
-    return state.history
-        .filter(h => h.store_slug === slug && h[KEY[state.purity]] != null)
-        .sort((a, b) => a.rate_date.localeCompare(b.rate_date))
-        .map(h => h[KEY[state.purity]]);
-}
-function sparkPath(vals, w, h) {
-    if (vals.length < 2) return '';
-    const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1;
-    const pts = vals.map((v, i) => [i / (vals.length - 1) * w, h - 6 - ((v - min) / rng) * (h - 12)]);
-    const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
-    const area = d + ` L${w},${h} L0,${h} Z`;
-    const up = vals[vals.length - 1] >= vals[0];
-    const col = up ? '#e08070' : '#6fbf86';
-    return `<path d="${area}" fill="${col}" opacity="0.1"/><path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>`;
-}
-function drawBenchSpark() {
-    const c = document.getElementById('bm-spark');
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    ctx.clearRect(0, 0, c.width, c.height);
-    const byDate = {}, k = KEY[state.purity];
-    state.history.forEach(h => { if (h[k] != null) (byDate[h.rate_date] ||= []).push(h[k]); });
-    const dates = Object.keys(byDate).sort();
-    const vals = dates.map(d => byDate[d].reduce((a, b) => a + b, 0) / byDate[d].length);
-    if (vals.length < 2) return;
-    const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1;
-    ctx.beginPath();
-    vals.forEach((v, i) => {
-        const x = i / (vals.length - 1) * c.width;
-        const y = c.height - 4 - ((v - min) / rng) * (c.height - 8);
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    });
-    ctx.strokeStyle = '#f4d780'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
-}
-
-// ─────────── History chart ───────────
-function shortDate(iso) {
-    const d = new Date(iso + 'T00:00:00');
-    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}
-
-async function loadChart() {
-    const ctx = document.getElementById('history-chart');
-    const note = document.getElementById('chart-note');
-    if (!ctx) return;
-    const k = KEY[state.purity];
-
-    const byStore = {};
-    state.history.forEach(h => { if (h[k] != null) (byStore[h.store_name] ||= []).push({ x: h.rate_date, y: h[k] }); });
-
-    // Only plot stores that have ≥2 days of history (single points just float at the edge)
-    const multi = Object.entries(byStore).filter(([, pts]) => new Set(pts.map(p => p.x)).size >= 2);
-    const singles = Object.keys(byStore).length - multi.length;
-
-    const labels = [...new Set(state.history.map(h => h.rate_date))].sort();
-    const palette = ['#f4d780', '#e08070', '#6fbf86', '#7fb0e0', '#c79ce0', '#e0a06f', '#7fd0c0', '#d0c060', '#e09cc0', '#9ce0a8'];
-    const datasets = multi.map(([name, pts], i) => ({
-        label: name,
-        data: pts.sort((a, b) => a.x.localeCompare(b.x)),
-        borderColor: palette[i % palette.length],
-        backgroundColor: palette[i % palette.length] + '14',
-        borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 5, tension: 0.35,
-        fill: multi.length === 1, spanGaps: true,
-    }));
-
-    if (note) {
-        note.textContent = datasets.length
-            ? (singles > 0 ? `${singles} store${singles > 1 ? 's' : ''} need more days of data to chart` : '')
-            : 'Trend builds up as rates are collected daily.';
-        note.style.display = note.textContent ? 'block' : 'none';
+    async function load() {
+        const [t, h, s] = await Promise.all([
+            fetch('/api/rates/today').then(r => r.json()).catch(() => ({ rates: [] })),
+            fetch('/api/history?days=30').then(r => r.json()).catch(() => ({ history: [] })),
+            fetch('/api/stores').then(r => r.json()).catch(() => ({ stores: [] })),
+        ]);
+        return { date: t.date, rates: t.rates || [], history: h.history || [], stores: s.stores || [] };
     }
 
-    if (chart) chart.destroy();
-    chart = new Chart(ctx, {
-        type: 'line',
-        data: { labels, datasets },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: { position: 'bottom', labels: { color: '#c9bfa8', usePointStyle: true, pointStyle: 'line', padding: 12, boxWidth: 22, font: { family: 'Manrope', size: 11 } } },
-                tooltip: {
-                    backgroundColor: '#1b160e', borderColor: 'rgba(212,175,55,0.3)', borderWidth: 1,
-                    titleColor: '#f4d780', bodyColor: '#f3ecdc', padding: 12,
-                    callbacks: {
-                        title: items => items.length ? shortDate(items[0].label) : '',
-                        label: c => ` ${c.dataset.label}: ₹${c.parsed.y?.toLocaleString('en-IN')}`,
-                    },
+    // Sorted store rows for a purity. mode: 'price-asc' | 'price-desc' | 'name'
+    function sortedRates(rates, purity, mode = 'price-asc') {
+        const k = KEY[purity]; const rows = [...rates];
+        if (mode === 'price-asc') rows.sort((a, b) => (a[k] ?? 1e9) - (b[k] ?? 1e9));
+        else if (mode === 'price-desc') rows.sort((a, b) => (b[k] ?? -1) - (a[k] ?? -1));
+        else rows.sort((a, b) => a.store_name.localeCompare(b.store_name));
+        return rows;
+    }
+
+    function stats(rates, purity) {
+        const k = KEY[purity];
+        const priced = rates.filter(r => r[k] != null);
+        const vals = priced.map(r => r[k]);
+        if (!vals.length) return { priced: [], vals: [], min: null, max: null, median: null, best: null, count: 0 };
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const best = priced.reduce((a, b) => (a[k] < b[k] ? a : b));
+        return { priced, vals, min, max, median: Math.round(median(vals)), best, count: priced.length };
+    }
+
+    function marketSeries(history, purity) {
+        const k = KEY[purity], by = {};
+        history.forEach(x => { if (x[k] != null) (by[x.rate_date] ||= []).push(x[k]); });
+        return Object.keys(by).sort().map(d => ({ x: d, y: Math.round(median(by[d])) }));
+    }
+
+    // Crisp inline-SVG sparkline (returns inner markup for an existing <svg viewBox="0 0 w h">)
+    function sparkSvg(vals, w, h, stroke, fill) {
+        if (!vals || vals.length < 2) return '';
+        const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1;
+        const pts = vals.map((v, i) => [i / (vals.length - 1) * w, h - 4 - ((v - min) / rng) * (h - 8)]);
+        const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+        const area = line + ` L${w},${h} L0,${h} Z`;
+        return (fill ? `<path d="${area}" fill="${fill}"/>` : '') +
+            `<path d="${line}" fill="none" stroke="${stroke}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+
+    // Build the trend chart into a <canvas>. Returns the Chart instance (destroy before rebuild).
+    function trendChart(canvas, history, purity, opts = {}) {
+        const k = KEY[purity];
+        const market = marketSeries(history, purity);
+        const byStore = {};
+        history.forEach(x => { if (x[k] != null) (byStore[x.store_name] ||= []).push({ x: x.rate_date, y: x[k] }); });
+        const multi = Object.entries(byStore).filter(([, p]) => new Set(p.map(q => q.x)).size >= 2);
+        const palette = ['#e8897a', '#74c78e', '#7fb0e0', '#c79ce0', '#e0a06f', '#7fd0c0'];
+        const line = opts.line || '#f6dd8b';
+        const ds = [];
+        if (market.length >= 2) {
+            ds.push({
+                label: 'Market trend', data: market, borderColor: line,
+                backgroundColor: opts.fill || 'rgba(244,215,128,0.12)',
+                borderWidth: 3, pointRadius: 0, pointHoverRadius: 5, tension: 0.38, fill: 'origin', spanGaps: true,
+            });
+        }
+        multi.forEach(([n, p], i) => ds.push({
+            label: n, data: p.sort((a, b) => a.x.localeCompare(b.x)),
+            borderColor: palette[i % palette.length], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
+            tension: 0.38, fill: false, spanGaps: true,
+        }));
+        const labels = [...new Set(history.map(x => x.rate_date))].sort();
+        const tick = opts.tick || '#9d9177', grid = opts.grid || 'rgba(212,175,55,0.06)';
+        return new Chart(canvas, {
+            type: 'line', data: { labels, datasets: ds },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: opts.animate === false ? false : { duration: 900, easing: 'easeOutCubic' },
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: opts.legend !== false, position: 'bottom', labels: { color: tick, usePointStyle: true, pointStyle: 'line', boxWidth: 20, padding: 12, font: { family: 'Manrope', size: 10 } } },
+                    tooltip: { backgroundColor: '#1a140c', borderColor: 'rgba(212,175,55,0.3)', borderWidth: 1, titleColor: '#f6dd8b', bodyColor: '#f4eddc', padding: 10, callbacks: { title: it => it.length ? shortDate(it[0].label) : '', label: c => ' ' + c.dataset.label + ': ₹' + (c.parsed.y == null ? '' : c.parsed.y.toLocaleString('en-IN')) } },
+                },
+                scales: {
+                    x: { grid: { color: grid }, ticks: { color: tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { family: 'Manrope', size: 10 }, callback: function (v) { return shortDate(this.getLabelForValue(v)); } } },
+                    y: { grid: { color: grid }, ticks: { color: tick, maxTicksLimit: 6, font: { family: 'JetBrains Mono', size: 10 }, callback: v => '₹' + v.toLocaleString('en-IN') } },
                 },
             },
-            scales: {
-                x: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#8e836b', maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { family: 'Manrope', size: 10 }, callback: function (v) { return shortDate(this.getLabelForValue(v)); } } },
-                y: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#8e836b', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 6, callback: v => '₹' + v.toLocaleString('en-IN') } },
-            },
-        },
-    });
-}
+        });
+    }
 
-// ─────────── Tabs ───────────
-function switchTab(name) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
-    if (name === 'history') loadChart();
-}
+    // Purity segmented control helper: wires buttons[data-purity] and calls onChange(purity)
+    function bindPurity(container, onChange) {
+        container.querySelectorAll('[data-purity]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                container.querySelectorAll('[data-purity]').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+                btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true');
+                onChange(btn.dataset.purity);
+            });
+        });
+    }
 
-// ─────────── Manual add ───────────
-function renderManualStores() {
-    const sel = document.getElementById('m-store');
-    sel.innerHTML = '<option value="">Select store…</option>' +
-        state.stores.map(s => `<option value='${JSON.stringify({ slug: s.slug, name: s.name })}'>${s.name}</option>`).join('') +
-        '<option value=\'{"slug":"custom","name":"Other local jeweller"}\'>Other local jeweller…</option>';
-}
-async function submitManual(e) {
-    e.preventDefault();
-    const raw = document.getElementById('m-store').value;
-    if (!raw) return;
-    const store = JSON.parse(raw);
-    const body = {
-        store_slug: store.slug, store_name: store.name,
-        gold_22k: parseFloat(document.getElementById('m-22k').value) || null,
-        gold_24k: parseFloat(document.getElementById('m-24k').value) || null,
-        gold_18k: parseFloat(document.getElementById('m-18k').value) || null,
-        source_url: document.getElementById('m-url').value || 'manual',
+    return { KEY, OTHERS, esc, safeUrl, inr, inrShort, median, fullDate, shortDate, load, sortedRates, stats, marketSeries, sparkSvg, trendChart, bindPurity };
+})();
+
+// ─────────── Page render (editorial layout) ───────────
+(function () {
+    var REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var chart;
+
+    var el = {
+        ebDate: document.getElementById('eb-date'),
+        num: document.getElementById('hero-num'),
+        best: document.getElementById('hero-best'),
+        spark: document.getElementById('hero-spark'),
+        median: document.getElementById('stat-median'),
+        spread: document.getElementById('stat-spread'),
+        count: document.getElementById('stat-count'),
+        stores: document.getElementById('stores'),
+        chartCap: document.getElementById('chart-cap'),
     };
-    if (!body.gold_22k && !body.gold_24k && !body.gold_18k) return showMsg('Enter at least one rate.', true);
-    try {
-        const r = await fetch('/api/rates/manual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (r.ok) { showMsg('Saved!'); e.target.reset(); loadRates(); toast('Rate added'); }
-        else { const er = await r.json(); showMsg(er.detail || 'Failed', true); }
-    } catch { showMsg('Network error', true); }
-}
-function showMsg(m, err) {
-    const el = document.getElementById('m-msg');
-    el.textContent = m; el.className = 'form-msg ' + (err ? 'err' : 'ok'); el.style.display = 'block';
-    setTimeout(() => el.style.display = 'none', 4000);
-}
 
-// ─────────── Refresh ───────────
-async function refreshAll() {
-    const btn = document.getElementById('refresh-btn');
-    btn.classList.add('spinning');
-    try {
-        await fetch('/api/scrape', { method: 'POST' });
-        await Promise.all([loadRates(), loadHistory()]);
-        toast('Rates refreshed');
-    } catch { toast('Refresh failed', true); }
-    finally { btn.classList.remove('spinning'); }
-}
+    function purityLabel(p) { return p.toUpperCase(); }
 
-// ─────────── Helpers ───────────
-function inr(v) { return '₹' + Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
-function inrShort(v) { return Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 }); }
-function fmtDate(s) {
-    const d = new Date(s + 'T00:00:00');
-    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}
-function fullDate(s) {
-    const d = new Date(s + 'T00:00:00');
-    return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-}
-function emptyState() {
-    return `<div style="grid-column:1/-1;text-align:center;padding:50px 20px;color:var(--ink-mute);">
-        <div style="font-size:2.4rem;margin-bottom:10px;">🪙</div>
-        <div style="font-weight:700;color:var(--ink-soft);margin-bottom:4px;">No rates yet</div>
-        <div style="font-size:0.86rem;">Tap refresh to pull live rates, or add a store manually.</div>
-    </div>`;
-}
-function updateAgo() {
-    const el = document.getElementById('updated-ago');
-    if (!state.lastUpdated) { el.textContent = 'live'; return; }
-    const then = new Date(state.lastUpdated.replace(' ', 'T') + 'Z');
-    const mins = Math.round((Date.now() - then.getTime()) / 60000);
-    el.textContent = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
-}
-function toast(m, err) {
-    const t = document.getElementById('toast');
-    t.textContent = m; t.className = 'toast show' + (err ? ' err' : '');
-    setTimeout(() => t.className = 'toast' + (err ? ' err' : ''), 2600);
-}
+    function heroBestHtml(best, purity) {
+        if (!best) return '<span class="sep">No live rate available</span>';
+        var name = Sona.esc(best.store_name);
+        var logo = Sona.safeUrl(best.logo);
+        var img = logo ? '<img class="b-logo" src="' + logo + '" alt="" loading="lazy" onerror="this.remove()">' : '';
+        return img + '<span>best ' + purityLabel(purity) + '</span><span class="sep">·</span><b>' + name + '</b>';
+    }
+
+    function othersHtml(r, purity) {
+        return Sona.OTHERS[purity].map(function (p) {
+            return '<span class="opair">' + p.toUpperCase() + ' <b>' + Sona.inrShort(r[Sona.KEY[p]]) + '</b></span>';
+        }).join('<span class="odiv">·</span>');
+    }
+
+    function changeHtml(r, purity) {
+        var c = r['change_' + purity];
+        if (c == null || c === 0) return '';
+        var up = c > 0;
+        var arrow = up ? '&#9650;' : '&#9660;';
+        return '<span class="chg ' + (up ? 'up' : 'down') + '">' + arrow + ' ' + Sona.inrShort(Math.abs(c)) + '</span>';
+    }
+
+    function cardHtml(r, purity, k, min, idx) {
+        var v = r[k];
+        var url = Sona.safeUrl(r.store_url || r.source_url);
+        var tag = url ? 'a' : 'div';
+        var href = url ? ' href="' + url + '" target="_blank" rel="noopener noreferrer"' : '';
+        var isBest = idx === 0 && v != null && v === min;
+        var name = Sona.esc(r.store_name);
+
+        var logoUrl = Sona.safeUrl(r.logo);
+        var initial = Sona.esc(((r.store_name || '?').trim().charAt(0) || '?').toUpperCase());
+        var logo = '<div class="c-logo"><span class="ini">' + initial + '</span>'
+            + (logoUrl ? '<img src="' + logoUrl + '" alt="" loading="lazy" onerror="this.remove()">' : '')
+            + '</div>';
+
+        var metaBits = [];
+        if (v == null) {
+            metaBits.push('<span class="vs na">No live rate</span>');
+        } else if (isBest) {
+            metaBits.push('<span class="tag-best">Best price</span>');
+        } else if (v === min) {
+            metaBits.push('<span class="vs">Matches best</span>');
+        } else {
+            metaBits.push('<span class="vs">+' + Sona.inr(v - min) + ' vs best</span>');
+        }
+        var ch = changeHtml(r, purity);
+        if (ch) metaBits.push(ch);
+
+        var priceCls = v == null ? 'c-price na' : 'c-price';
+        var priceTxt = Sona.inr(v);
+
+        return '<' + tag + ' class="card' + (isBest ? ' best' : '') + '"' + href + '>'
+            + logo
+            + '<div class="c-main">'
+            + '<div class="c-name">' + name + '</div>'
+            + '<div class="c-meta">' + metaBits.join('') + '</div>'
+            + '<div class="c-others">' + othersHtml(r, purity) + '</div>'
+            + '</div>'
+            + '<div class="c-price-wrap"><div class="' + priceCls + ' num">' + priceTxt + '</div></div>'
+            + '</' + tag + '>';
+    }
+
+    function render(d, purity) {
+        var k = Sona.KEY[purity];
+        var s = Sona.stats(d.rates, purity);
+
+        el.num.textContent = Sona.inr(s.min);
+        el.best.innerHTML = heroBestHtml(s.best, purity);
+
+        var series = Sona.marketSeries(d.history, purity).map(function (p) { return p.y; });
+        if (series.length >= 2) {
+            el.spark.innerHTML = '<svg viewBox="0 0 320 44" preserveAspectRatio="none" role="img" aria-label="Recent market trend">'
+                + Sona.sparkSvg(series, 320, 44, '#fbbf24', 'rgba(251,191,36,0.12)') + '</svg>';
+        } else { el.spark.innerHTML = ''; }
+
+        el.median.textContent = Sona.inr(s.median);
+        el.spread.textContent = Sona.inr(s.max != null ? s.max - s.min : null);
+        el.count.textContent = s.count;
+
+        var rows = Sona.sortedRates(d.rates, purity, 'price-asc');
+        el.stores.innerHTML = rows.map(function (r, i) { return cardHtml(r, purity, k, s.min, i); }).join('');
+
+        el.chartCap.textContent = 'Median · ' + purity.toUpperCase();
+        if (chart) chart.destroy();
+        chart = Sona.trendChart(document.getElementById('chart'), d.history, purity, {
+            line: '#fbbf24', fill: 'rgba(251,191,36,0.14)', tick: '#a1a1aa', grid: 'rgba(255,255,255,0.06)',
+            animate: !REDUCED
+        });
+    }
+
+    Sona.load().then(function (d) {
+        el.ebDate.textContent = d.date ? Sona.fullDate(d.date) : '—';
+        render(d, '22k');
+        Sona.bindPurity(document.getElementById('purity'), function (p) { render(d, p); });
+    }).catch(function () {
+        el.best.innerHTML = '<span class="sep">Live rates are unavailable right now.</span>';
+    });
+})();

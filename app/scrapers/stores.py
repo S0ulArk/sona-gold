@@ -57,9 +57,6 @@ STORE_CONFIGS = [
     {"name": "Kalyan Jewellers", "slug": "kalyan-jewellers", "method": "kalyan",
      "url": "https://www.kalyanjewellers.net/gold-rate/Gold-Rate-Today", "logo": _favicon("kalyanjewellers.net"),
      "cities": ["Delhi", "Moradabad", "Bareilly"]},
-    {"name": "Joyalukkas", "slug": "joyalukkas", "method": "joyalukkas",
-     "url": "https://www.joyalukkas.in/goldrate", "logo": _favicon("joyalukkas.in"),
-     "cities": ["Delhi", "Noida"]},
     {"name": "Senco Gold", "slug": "senco-gold", "method": "senco",
      "url": "https://sencogoldanddiamonds.com/gold-price-calculator", "logo": _favicon("sencogoldanddiamonds.com"),
      "cities": ["Delhi", "Ghaziabad", "Noida"]},
@@ -69,15 +66,6 @@ STORE_CONFIGS = [
     {"name": "Candere", "slug": "candere", "method": "candere",
      "url": "https://www.candere.com/gold-rate-today/delhi", "logo": _favicon("candere.com"),
      "cities": ["Delhi", "Ghaziabad"]},
-    {"name": "Khanna Jewellers", "slug": "khanna-jewellers", "method": "khanna",
-     "url": "https://khannajeweller.com/", "logo": _favicon("khannajeweller.com"),
-     "cities": ["Delhi"]},
-    {"name": "RK Jewellers (South Ex)", "slug": "rk-jewellers", "method": "rk",
-     "url": "https://rkjewellers.in/pages/todays-gold-rate", "logo": _favicon("rkjewellers.in"),
-     "cities": ["Delhi"]},
-    {"name": "Rama Krishna Jewellers", "slug": "rama-krishna", "method": "ramakrishna",
-     "url": "https://ramakrishnajewellers.org/", "logo": _favicon("ramakrishnajewellers.org"),
-     "cities": ["Delhi"]},
 
     # ---- manual-only (famous local, no online rate) ----
     {"name": "PC Jeweller", "slug": "pc-jeweller", "method": "manual",
@@ -102,12 +90,6 @@ STORE_CONFIGS = [
 ]
 
 SCRAPERS = {s["slug"]: s for s in STORE_CONFIGS}
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "en-IN,en;q=0.9",
-}
 
 
 def _make_rate(config: dict) -> GoldRate:
@@ -236,21 +218,6 @@ def _s_kalyan(cfg):
     return rate
 
 
-# ═══════════════ Joyalukkas (GraphQL) ═══════════════
-def _s_joyalukkas(cfg):
-    rate = _make_rate(cfg)
-    q = ("query getgoldrates{getgoldrates{Data{GOLD_18KT_RATE GOLD_22KT_RATE GOLD_24KT_RATE}}}")
-    s = cffi_requests.Session(impersonate="chrome131")
-    d = s.get("https://www.joyalukkas.com/graphql",
-              params={"query": q, "operationName": "getgoldrates", "variables": "{}"},
-              headers={"Accept": "application/json"}, timeout=15).json()
-    it = d["data"]["getgoldrates"]["Data"][0]
-    rate.gold_22k = parse_price(it.get("GOLD_22KT_RATE"))
-    rate.gold_24k = parse_price(it.get("GOLD_24KT_RATE"))
-    rate.gold_18k = parse_price(it.get("GOLD_18KT_RATE"))
-    return rate
-
-
 # ═══════════════ Senco (calculator API) ═══════════════
 def _s_senco(cfg):
     rate = _make_rate(cfg)
@@ -300,53 +267,9 @@ def _s_candere(cfg):
     return rate
 
 
-# ═══════════════ Khanna Jewellers (Shopify metalPriceConfig) ═══════════════
-def _s_khanna(cfg):
-    rate = _make_rate(cfg)
-    s = cffi_requests.Session(impersonate="chrome131")
-    html = s.get(cfg["url"], timeout=15).text
-    m = re.search(r"const\s+metalPriceConfig\s*=\s*(\{[^;]+\});", html)
-    if m:
-        d = json.loads(m.group(1))
-        rate.gold_22k = parse_price(d.get("gold_price_22k"))
-        rate.gold_24k = parse_price(d.get("gold_price_24k"))
-        rate.gold_18k = parse_price(d.get("gold_price_18k"))
-    return rate
-
-
-# ═══════════════ RK Jewellers (Shopify Liquid vars, per 10g) ═══════════════
-def _s_rk(cfg):
-    rate = _make_rate(cfg)
-    s = cffi_requests.Session(impersonate="chrome131")
-    html = s.get(cfg["url"], timeout=15).text
-    m = re.search(r"let result\s*=\s*(\d+);", html)
-    m18 = re.search(r"let result18Kgold\s*=\s*(\d+);", html)
-    if m:
-        res = int(m.group(1))
-        rate.gold_22k = round(res / 10)
-        rate.gold_24k = round((res * 100 / 90.42) / 10)
-    if m18:
-        rate.gold_18k = int(m18.group(1)) / 10
-    return rate
-
-
-# ═══════════════ Rama Krishna Jewellers (RevSlider text, per 10g) ═══════════════
-def _s_ramakrishna(cfg):
-    rate = _make_rate(cfg)
-    s = cffi_requests.Session(impersonate="chrome131")
-    html = s.get(cfg["url"], timeout=15).text
-    rates = {int(kt): int(p.replace(",", "")) / 10
-             for kt, p in re.findall(r"(\d{2})kt\.\s*\d{3}\.\s*([\d,]+)", html, re.I)}
-    rate.gold_22k = rates.get(22)
-    rate.gold_24k = rates.get(24)
-    rate.gold_18k = rates.get(18)
-    return rate
-
-
 _FUNCS = {
     "tanishq": _s_tanishq, "malabar": _s_malabar, "kalyan": _s_kalyan,
-    "joyalukkas": _s_joyalukkas, "senco": _s_senco, "caratlane": _s_caratlane,
-    "candere": _s_candere, "khanna": _s_khanna, "rk": _s_rk, "ramakrishna": _s_ramakrishna,
+    "senco": _s_senco, "caratlane": _s_caratlane, "candere": _s_candere,
 }
 
 

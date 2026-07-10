@@ -2,7 +2,7 @@ import logging
 from datetime import date
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.scrapers import scrape_all
-from app.database import save_rate, get_today_rates
+from app.database import save_rate, get_today_rates, prune_old
 
 # Stores fetched via the paid scraping-API proxy — only worth fetching once/day
 # (their rate is fixed for the day), to conserve credits.
@@ -46,6 +46,10 @@ async def run_scrape_job(skip_proxy: bool = False):
             await save_rate_with_history(rate)
             saved += 1
     logger.info(f"Scrape complete: {saved}/{len(rates)} stores saved")
+    try:
+        await prune_old()
+    except Exception as e:
+        logger.warning(f"History prune skipped: {e}")
 
 
 def start_scheduler():
