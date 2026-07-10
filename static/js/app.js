@@ -62,6 +62,7 @@ window.Sona = (function () {
 
     // Build the trend chart into a <canvas>. Returns the Chart instance (destroy before rebuild).
     function trendChart(canvas, history, purity, opts = {}) {
+        if (typeof Chart === 'undefined' || !canvas) return null;  // never break the page if Chart.js failed to load
         const k = KEY[purity];
         const market = marketSeries(history, purity);
         const byStore = {};
