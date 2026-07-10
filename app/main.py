@@ -40,10 +40,17 @@ app = FastAPI(title="SONA — Gold Rates", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
+# Cache-busting version for CSS/JS: the app.js mtime (= deploy time on Render), so a
+# new deploy changes every asset URL and browsers can never serve stale JS/CSS.
+try:
+    ASSET_V = str(int((BASE_DIR / "static" / "js" / "app.js").stat().st_mtime))
+except OSError:
+    ASSET_V = "1"
+
 
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(request, "index.html", {"v": ASSET_V})
 
 
 @app.get("/api/stores")
