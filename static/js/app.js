@@ -226,11 +226,37 @@ window.Sona = (function () {
         });
     }
 
-    Sona.load().then(function (d) {
-        el.ebDate.textContent = d.date ? Sona.fullDate(d.date) : '—';
-        render(d, '22k');
-        Sona.bindPurity(document.getElementById('purity'), function (p) { render(d, p); });
-    }).catch(function () {
-        el.best.innerHTML = '<span class="sep">Live rates are unavailable right now.</span>';
+    var currentPurity = '22k';
+    var data = null;
+
+    function paint() { if (data) render(data, currentPurity); }
+
+    // Wire the purity toggle up-front so it responds even while data is loading.
+    Sona.bindPurity(document.getElementById('purity'), function (p) { currentPurity = p; paint(); });
+
+    // Returns true once real rates are present. On a cold start the server's
+    // database is still being filled by the first scrape, so rates arrive empty
+    // for the first ~30–60s — show a "fetching" state instead of looking dead.
+    function load(isRetry) {
+        return Sona.load().then(function (d) {
+            data = d;
+            el.ebDate.textContent = d.date ? Sona.fullDate(d.date) : '—';
+            if (d.rates.length) { paint(); return true; }
+            el.num.textContent = '₹—';
+            el.best.innerHTML = '<span class="sep">Fetching live rates… the first load can take up to a minute.</span>';
+            return false;
+        }).catch(function () {
+            if (!isRetry) el.best.innerHTML = '<span class="sep">Live rates are unavailable right now.</span>';
+            return false;
+        });
+    }
+
+    load(false).then(function (ok) {
+        if (ok) return;
+        var tries = 0;
+        var timer = setInterval(function () {
+            tries++;
+            load(true).then(function (done) { if (done || tries >= 18) clearInterval(timer); });
+        }, 5000);  // poll every 5s for ~90s until the scrape lands
     });
 })();
